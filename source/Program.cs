@@ -4,10 +4,13 @@ using Microsoft.CodeAnalysis;
 
 namespace gotosan
 {
-    public class Program
+    /// <summary>
+    /// This class reads a gotosan file and runs it.
+    /// </summary>
+    public static class Program
     {
         private static void Main(string[] args) {
-            // Check that there is a valid gotochan file to be run
+            // Check that there is a valid gotosan file to be run
             if (args.Length == 0) {
                 return;
             }
@@ -46,6 +49,5 @@ namespace gotosan
             Console.WriteLine($"Parsed in {(DateTimeOffset.Now.ToUnixTimeMilliseconds() - StartTime) / 1000d} seconds."); // End benchmark
             Console.WriteLine("-------------------------");
         }
-        
     }
 }

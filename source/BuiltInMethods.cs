@@ -1,5 +1,8 @@
 ﻿namespace gotosan
 {
+    /// <summary>
+    /// This class contains built-in methods that can be accessed as labels.
+    /// </summary>
     internal static class BuiltInMethods
     {
         public static readonly List<string> VariablesUsed = new() {
@@ -99,6 +102,22 @@ else {
     Error(""round param must be a number."");
 }
             "},
+            {"floor", @"
+if (variable_param.GetType() == typeof(double)) {
+    variable_result = Math.Floor((double)variable_param);
+}
+else {
+    Error(""floor param must be a number."");
+}
+"},
+            {"ceiling", @"
+if (variable_param.GetType() == typeof(double)) {
+    variable_result = Math.Ceiling((double)variable_param);
+}
+else {
+    Error(""ceiling param must be a number."");
+}
+"},
         };
     }
 }

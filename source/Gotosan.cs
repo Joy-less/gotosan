@@ -4,9 +4,12 @@ using Microsoft.CodeAnalysis;
 
 namespace gotosan
 {
+    /// <summary>
+    /// This class contains the code that parses and runs a gotosan program.
+    /// </summary>
     public static class Gotosan
     {
-        public const string Version = "1.0.1";
+        public const string Version = "1.0.2";
 
         public static string Parse(string Code) {
             // Begin parsing code
@@ -43,11 +46,11 @@ namespace gotosan
                             // If statement
                             string[] GotoIfStatement = {"", ""};
                             if (Words.Length >= 4 && Words[2] == "if") {
-                                if (IsVariableNameValid(Words[3])) {
+                                if (IsVariableOrLabelNameValid(Words[3])) {
                                     GotoIfStatement = new string[] {$"if (variable_{Words[3]}.Equals(true)) {{", "}"};
                                 }
                                 else {
-                                    Error(LineNumber, "variable identifiers may only contain letters.");
+                                    Error($"variable identifier '{Words[3]}' is invalid.");
                                 }
                             }
                             else if (Words.Length == 3 || (Words.Length > 3 && Words[2] != "if")) {
@@ -74,7 +77,7 @@ namespace gotosan
                                 CurrentLineForGoto = $"goto {GotoTargetLabel};";
                             }
                             // Goto label
-                            else if (IsVariableNameValid(Words[1])) {
+                            else if (IsVariableOrLabelNameValid(Words[1])) {
                                 string LabelName = Words[1];
                                 // Goto built-in label
                                 if (BuiltInMethods.Methods.ContainsKey(Words[1])) {
@@ -108,7 +111,7 @@ namespace gotosan
                     }
                     // Label
                     else if (Words[0] == "label") {
-                        if (Words.Length >= 2 && Words[1].Length >= 1 && IsVariableNameValid(Words[1])) {
+                        if (Words.Length >= 2 && Words[1].Length >= 1 && IsVariableOrLabelNameValid(Words[1])) {
                             AddVariable($"label_{Words[1]}", "int");
                             AddLine(LineNumber, "");
                         }
@@ -118,7 +121,7 @@ namespace gotosan
                     }
                     // Backto
                     else if (Words[0] == "backto") {
-                        if (Words.Length >= 2 && Words[1].Length >= 1 && IsVariableNameValid(Words[1])) {
+                        if (Words.Length >= 2 && Words[1].Length >= 1 && IsVariableOrLabelNameValid(Words[1])) {
                             int LineOfLabel = Array.IndexOf(CodeLines, $"label {Words[1]}");
                             if (LineOfLabel >= 0) {
                                 string Identifier = GetIdentifierFromNumber(LineOfLabel);
@@ -134,19 +137,29 @@ namespace gotosan
                         }
                     }
                     // Variable operation
-                    else if (IsVariableNameValid(Words[0])) {
+                    else {
                         if (Words.Length >= 2 && Words[1].Length >= 1) {
-                            if (Words.Length >= 3 && Words[2].Length >= 1 && IsGotochanValueValid(Words[2])) {
+                            if (Words.Length >= 3 && Words[2].Length >= 1 && IsGotosanValueValid(Words[2])) {
                                 // Get second value
-                                string SecondValue = GotochanValueToCSharpValue(LineNumber, Words[2]);
-                                bool SecondValueIsVariable = SecondValue.StartsWith("variable_") && IsVariableNameValid(SecondValue.Substring("variable_".Length));
-                                object SecondValueValue = !SecondValueIsVariable ? CSharpScript.EvaluateAsync(SecondValue).Result : SecondValue;
+                                string SecondValue = GotosanValueToCSharpValue(LineNumber, Words[2]);
+                                bool SecondValueIsVariable = SecondValue.StartsWith("variable_");
+                                // Check if variable name is valid
+                                if (Words[0].StartsWith("variable_") && IsVariableOrLabelNameValid(Words[0].Substring("variable_".Length)) == false) {
+                                    Error($"variable identifier '{Words[0]}' is invalid.");
+                                }
+                                else if (SecondValueIsVariable == true && SecondValue.StartsWith("variable_") && IsVariableOrLabelNameValid(SecondValue.Substring("variable_".Length)) == false) {
+                                    Error($"variable identifier '{SecondValue}' is invalid.");
+                                }
                                 // Set
                                 if (Words[1] == "=") {
                                     // Set variable to comparison
                                     if (Words.Length == 5 && new string[] {"==", "!=", ">", "<", ">=", "<=" }.Contains(Words[3])) {
-                                        string ThirdValue = GotochanValueToCSharpValue(LineNumber, Words[4]);
-                                        if (Words[3] == "==" || Words[3] == "!=") {
+                                        string ThirdValue = GotosanValueToCSharpValue(LineNumber, Words[4]);
+                                        bool ThirdValueIsVariable = ThirdValue.StartsWith("variable_");
+                                        if (ThirdValueIsVariable == true && ThirdValue.StartsWith("variable_") && IsVariableOrLabelNameValid(ThirdValue.Substring("variable_".Length)) == false) {
+                                            Error($"variable identifier '{ThirdValue}' is invalid.");
+                                        }
+                                        else if (Words[3] == "==" || Words[3] == "!=") {
                                             AddLine(LineNumber, $"variable_{Words[0]} = {(Words[3] == "!=" ? "!" : "")}{SecondValue}.Equals({ThirdValue});");
                                         }
                                         else {
@@ -163,22 +176,26 @@ namespace gotosan
                                     }
                                     AddVariable($"variable_{Words[0]}", "object?");
                                 }
-                                // Add
-                                else if (Words[1] == "+=") {
-                                    AddLine(LineNumber, $"variable_{Words[0]} = Add(variable_{Words[0]}, {SecondValue});");
-                                }
-                                // Subtract / Multiply / Divide
-                                else if (Words[1] == "-=" || Words[1] == "*=" || Words[1] == "/=") {
-                                    string Function = (Words[1] == "-=" ? "Subtract" : (Words[1] == "*=" ? "Multiply" : "Divide"));
-                                    AddLine(LineNumber, $"variable_{Words[0]} = {Function}(variable_{Words[0]}, {SecondValue});");
-                                }
-                                // Error
                                 else {
-                                    Error(LineNumber, $"unknown variable operation '{Words[1]}'.");
+                                    // Add / Subtract / Multiply / Divide / Modulo / Exponentiate
+                                    Dictionary<string, string> Functions = new() {
+                                        {"+=", "Add"},
+                                        {"-=", "Subtract"},
+                                        {"*=", "Multiply"},
+                                        {"/=", "Divide"},
+                                        {"%=", "Modulo"},
+                                        {"^=", "Exponentiate"},
+                                    };
+                                    if (Functions.TryGetValue(Words[1], out string Function)) {
+                                        AddLine(LineNumber, $"variable_{Words[0]} = {Function}(variable_{Words[0]}, {SecondValue});");
+                                    }
+                                    else {
+                                        Error(LineNumber, $"unknown variable operator: '{Words[1]}'.");
+                                    }
                                 }
                             }
                             else {
-                                Error(LineNumber, $"variable operation value '{Words[2]}' is invalid.");
+                                Error(LineNumber, $"value '{Words[2]}' is invalid.");
                             }
                         }
                         else if (Words[0] != string.Empty) {
@@ -225,43 +242,75 @@ namespace gotosan
             public static void Error(string? Message) {
                 Gotosan.Error(Message);
             }
-            public static object Add(object Num1, object Num2) {
-                if (Num1.GetType() == typeof(string) || Num2.GetType() == typeof(string)) {
-                    return Num1.ToString() + Num2.ToString();
+
+            public static object Add(object Value1, object Value2) {
+                // Add string
+                if (Value1.GetType() == typeof(string) || Value2.GetType() == typeof(string)) {
+                    return Value1.ToString() + Value2.ToString();
                 }
-                else if (Num1.GetType() == typeof(double) && Num2.GetType() == typeof(double)) {
-                    return (double)Num1 + (double)Num2;
+                // Add double and double
+                else if (Value1.GetType() == typeof(double) && Value2.GetType() == typeof(double)) {
+                    return (double)Value1 + (double)Value2;
                 }
+                // Error
                 else {
-                    Error($"cannot add objects of type {Num1.GetType()} and {Num2.GetType()}.");
-                    return 0;
+                    Error($"cannot add objects of type {Value1.GetType()} and {Value2.GetType()}.");
+                    return false;
                 }
             }
-            public static object Subtract(object Num1, object Num2) {
-                if (Num1.GetType() == typeof(double) && Num2.GetType() == typeof(double)) {
-                    return (double)Num1 - (double)Num2;
+            public static object Subtract(object Value1, object Value2) {
+                // Subtract double and double
+                if (Value1.GetType() == typeof(double) && Value2.GetType() == typeof(double)) {
+                    return (double)Value1 - (double)Value2;
                 }
+                // Error
                 else {
-                    Error($"cannot subtract objects of type {Num1.GetType()} and {Num2.GetType()}.");
-                    return 0;
+                    Error($"cannot subtract objects of type {Value1.GetType()} and {Value2.GetType()}.");
+                    return false;
                 }
             }
-            public static object Multiply(object Num1, object Num2) {
-                if (Num1.GetType() == typeof(double) && Num2.GetType() == typeof(double)) {
-                    return (double)Num1 * (double)Num2;
+            public static object Multiply(object Value1, object Value2) {
+                // Multiply double and double
+                if (Value1.GetType() == typeof(double) && Value2.GetType() == typeof(double)) {
+                    return (double)Value1 * (double)Value2;
                 }
+                // Error
                 else {
-                    Error($"cannot subtract objects of type {Num1.GetType()} and {Num2.GetType()}.");
-                    return 0;
+                    Error($"cannot multiply objects of type {Value1.GetType()} and {Value2.GetType()}.");
+                    return false;
                 }
             }
-            public static object Divide(object Num1, object Num2) {
-                if (Num1.GetType() == typeof(double) && Num2.GetType() == typeof(double)) {
-                    return (double)Num1 / (double)Num2;
+            public static object Divide(object Value1, object Value2) {
+                // Divide double and double
+                if (Value1.GetType() == typeof(double) && Value2.GetType() == typeof(double)) {
+                    return (double)Value1 / (double)Value2;
                 }
+                // Error
                 else {
-                    Error($"cannot subtract objects of type {Num1.GetType()} and {Num2.GetType()}.");
-                    return 0;
+                    Error($"cannot divide objects of type {Value1.GetType()} and {Value2.GetType()}.");
+                    return false;
+                }
+            }
+            public static object Modulo(object Value1, object Value2) {
+                // Modulo double and double
+                if (Value1.GetType() == typeof(double) && Value2.GetType() == typeof(double)) {
+                    return (double)Value1 % (double)Value2;
+                }
+                // Error
+                else {
+                    Error($"cannot modulo objects of type {Value1.GetType()} and {Value2.GetType()}.");
+                    return false;
+                }
+            }
+            public static object Exponentiate(object Value1, object Value2) {
+                // Exponentiate double and double
+                if (Value1.GetType() == typeof(double) && Value2.GetType() == typeof(double)) {
+                    return Math.Pow((double)Value1, (double)Value2);
+                }
+                // Error
+                else {
+                    Error($"cannot exponentiate objects of type {Value1.GetType()} and {Value2.GetType()}.");
+                    return false;
                 }
             }
             public static bool Compare(object Num1, string Operator, object Num2) {
@@ -327,17 +376,17 @@ namespace gotosan
             }
             return Identifier;
         }
-        private static bool IsGotochanValueValid(string ValueString) {
+        private static bool IsGotosanValueValid(string ValueString) {
             if (ValueString.StartsWith('~') || (ValueString.Contains(',') == false && double.TryParse(ValueString, out _)) || ValueString == "yes" ||
-                ValueString == "no" || ValueString == "null" || IsVariableNameValid(ValueString)) {
+                ValueString == "no" || ValueString == "null" || IsVariableOrLabelNameValid(ValueString)) {
                 return true;
             }
             return false;
         }
-        private static string GotochanValueToCSharpValue(int LineNumber, string ValueString) {
+        private static string GotosanValueToCSharpValue(int LineNumber, string ValueString) {
             // String
             if (ValueString.StartsWith('~')) {
-                return "@\"" + ValueString[1..].Replace('~', ' ').Replace("\\n", "\n").Replace("\\h", "#").Replace("\"", "\"\"") + '"';
+                return "@\"" + ValueString.Substring(1).Replace('~', ' ').Replace("\\n", "\n").Replace("\\h", "#").Replace("\"", "\"\"") + '"';
             }
             // Double
             else if (ValueString.Contains(',') == false && double.TryParse(ValueString, out double DoubleResult)) {
@@ -355,7 +404,7 @@ namespace gotosan
                 return "null";
             }
             // Variable
-            else if (IsVariableNameValid(ValueString)) {
+            else if (IsVariableOrLabelNameValid(ValueString)) {
                 return $"variable_{ValueString}";
             }
             // Unknown
@@ -364,7 +413,7 @@ namespace gotosan
                 return string.Empty;
             }
         }
-        private static bool IsVariableNameValid(string VariableName) {
+        private static bool IsVariableOrLabelNameValid(string VariableName) {
             for (int i = 0; i < VariableName.Length; i++) {
                 if (char.IsLetter(VariableName[i]) || (i != 0 && char.IsDigit(VariableName[i]))) {
                     continue;
