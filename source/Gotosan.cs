@@ -1,13 +1,12 @@
 ﻿using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
 using Microsoft.CodeAnalysis;
-using System.Numerics;
 
 namespace gotosan
 {
     public static class Gotosan
     {
-        public const string Version = "1.0.0";
+        public const string Version = "1.0.1";
 
         public static string Parse(string Code) {
             // Begin parsing code
@@ -123,14 +122,8 @@ namespace gotosan
                             int LineOfLabel = Array.IndexOf(CodeLines, $"label {Words[1]}");
                             if (LineOfLabel >= 0) {
                                 string Identifier = GetIdentifierFromNumber(LineOfLabel);
-                                // Add backto possibilities
-                                string BackToMethod = $"switch (callline_{Identifier}) {{";
-                                for (int i = 0; i < CodeLines.Length; i++) {
-                                    BackToMethod += $"case {i}: goto {GetIdentifierFromNumber(i)}; break;";
-                                }
-                                BackToMethod += "}";
                                 AddVariable($"callline_{Identifier}", "int");
-                                AddLine(LineNumber, BackToMethod);
+                                AddLine(LineNumber, $"BackToLineNumber = callline_{Identifier}; goto BackTo;");
                             }
                             else {
                                 Error(LineNumber, $"backto label '{Words[1]}' does not exist.");
@@ -197,6 +190,16 @@ namespace gotosan
                     AddLine(LineNumber, "");
                 }
             }
+
+            // Add backto possibilities
+            AddVariable("BackToLineNumber", "int");
+            ParsedCode += "\nreturn;";
+            string BackToMethod = "\nBackTo: switch (BackToLineNumber) {";
+            for (int i = 0; i < CodeLines.Length; i++) {
+                BackToMethod += $"case {i}: goto {GetIdentifierFromNumber(i)}; break;";
+            }
+            BackToMethod += "}";
+            ParsedCode += BackToMethod;
 
             // Add built-in method variables
             foreach (string Variable in BuiltInMethods.VariablesUsed) {
@@ -288,7 +291,7 @@ namespace gotosan
                 await CSharpScript.RunAsync(ParsedCode, ScriptOptions.Default.WithOptimizationLevel(OptimizationLevel.Release), new RunGlobals());
             }
             catch (Exception E) {
-                Error($"there was an error running your code: '{E.Message}'.\n{ParsedCode}");
+                Error($"there was an error running your code: '{E.Message}'.");
             }
         }
 
